@@ -1,0 +1,177 @@
+FIREWALLD
+
+config.vm.define :servidor2 do |servidor2|
+servidor2.vm.box = "bento/centos-7.9"
+servidor2.vm.network :private_network, ip: "192.168.50.4"
+servidor2.vm.hostname = "servidor2"
+end
+
+
+PARCIAL
+
+AJUSTE EN LAS REGLAS DE CONFIGURACIÓN---
+
+sudo firewall-cmd --zone=internal --change-interface=eth1
+
+firewall-cmd --direct --add-rule ipv4 nat POSTROUTING 0 -o eth0 -j MASQUERADE
+firewall-cmd --direct --add-rule ipv4 filter FORWARD 0 -i eth1 -o eht0 -j ACCEPT
+firewall-cmd --direct --add-rule ipv4 filter FORWARD 0 -i eth0 -o eht1 -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+firewall-cmd --zone=public --add-service=http
+firewall-cmd --zone=public --add-service=https
+firewall-cmd --zone=public --add-service=dns
+
+firewall-cmd --zone=dmz --add-service=http
+firewall-cmd --zone=dmz --add-service=https
+firewall-cmd --zone=dmz --add-service=dns
+
+firewall-cmd --zone=internal --add-service=http
+firewall-cmd --zone=internal --add-service=https
+firewall-cmd --zone=internal --add-service=dns
+
+sudo route del -net 0.0.0.0 gw 10.0.2.2 netmask 0.0.0.0 dev eth0
+
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout vsftpd.key -out vsftpd.crt
+
+cp vsftpd.crt certs/vsftpd.crt
+cp vsftpd.key private/vsftpd.key
+
+ssl_enable=YES
+allow_anon_ssl=NO
+force_local_data_ssl=YES
+force_local_logins_ssl=YES
+ssl_tlsv1_1=YES
+ssl_tlsv1_2=YES
+ssl_tlsv1=NO
+ssl_sslv2=NO
+ssl_sslv3=NO
+require_ssl_reuse=YES
+ssl_ciphers=HIGH
+rsa_cert_file=/etc/pki/tls/certs/vsftpd.crt
+rsa_private_key_file=/etc/pki/tls/private/vsftpd.key
+
+systemctl restart vsftpd
+
+creamos un usuaro JUAN
+systemctl enable vsftpd
+
+firewall-cmd --add-forward-port=port=2121:proto=tcp:toport=21:toaddr=192.168.50.4
+firewall-cmd --permanent --zone=dmz --remove-port=2021/tcp
+firewall-cmd --permanent --add-port=2021/tcp
+
+firewall-cmd --permanent --zone=dmz --add-port=2021/tcp
+
+firewall-cmd --list-forward-ports
+firewall-cmd --list-ports
+
+firewall-cmd --zone=dmz --add-masquerade
+firewall-cmd --zone=dmz --query-masquerade
+
+firewall-cmd --runtime-to-permanent
+
+firewall-cmd --get-active-zones
+
+firewall-cmd --zone=dmz --add-interface=eth1
+
+---
+
+sudo firewall-cmd --zone=internal --change-interface=eth1
+
+service NetworkManager stop
+chkconfig NetworkManager off
+
+sysctl -p
+
+sudo firewall-cmd --set-default-zone=dmz
+sudo firewall-cmd --zone=dmz --remove-port=2121 --permanent
+
+
+EN SERVIDOR 2
+
+vim /etc/vsftpd/vsftpd.conf
+
+pasv_enable=YES
+pasv_min_port=1024
+pasv_max_port=1048
+pasv_promiscuous=YES
+write_enable=YES
+
+
+PUNTO 1 - DNS
+
+yum install bind bind-utils -y
+
+
+vim /etc/named.conf
+
+options {
+        listen-on port 53 { 127.0.0.1; 192.168.50.4; };
+        allow-query     { localhost; 192.168.50.0/24; };
+
+/* zona hacia adelante*/
+zone "servicios.com" IN {
+        type master;
+file "servicios.com.fwd";
+};
+
+
+/* zona reversa*/
+zone "50.168.192.in-addr.arpa" IN {
+        type master;
+        file "servicios.com.rev";
+};
+
+
+
+
+
+
+$ORIGIN servicios.com.
+$TTL 3H
+@       IN SOA  server.servicios.com. root@servicios.com. (
+                                        0       ; serial
+                                        1D      ; refresh
+                                        1H      ; retry
+                                        1W      ; expire
+                                        3H )    ; minimum
+@       IN      NS      server.servicios.com.
+
+;host en la zona
+
+server  IN      A       192.168.50.3
+www     IN      CNAME   server
+
+---
+
+$ORIGIN 50.168.192.in-addr.arpa.
+$TTL 3H
+@       IN SOA  server.servicios.com. root@servicios.com. (
+                                        0       ; serial
+                                        1D      ; refresh
+                                        1H      ; retry
+                                        1W      ; expire
+                                        3H )    ; minimum
+@       IN      NS      server.servicios.com.
+
+;host en la zona
+
+3       IN      PTR     server.servicios.com.
+
+
+yum -y install httpd mod_ssl
+sudo systemctl enable httpd.service
+systemctl start httpd.service
+
+
+sudo vim
+cd /etc/httpd/conf.d/ssl.conf
+
+cd /etc/httpd/conf
+
+vim /etc/named.rfc1912.zones
+
+systemctl restart named
+
+sudo vim /etc/resolv.conf
+
+systemctl stop named
